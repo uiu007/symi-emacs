@@ -1,6 +1,7 @@
 pub mod byte_char_mapper;
 pub mod commands;
 pub mod manager;
+pub mod bin;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,6 +31,8 @@ pub fn run() {
             commands::get_volume,
             commands::validate_midi_export,
             commands::export_midi,
+            commands::start_lsp_server,
+            commands::stop_lsp_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

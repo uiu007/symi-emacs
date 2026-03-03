@@ -1,6 +1,8 @@
 use symi::compiler::types::EventBody;
 use symi::Compiler;
 use tauri::Emitter;
+use std::sync::Arc;
+use std::thread;
 
 fn build_midi_bytes(
     file_id: String,
@@ -282,5 +284,58 @@ pub fn export_midi(
 
     std::fs::write(&target_path, &bytes).map_err(|e| format!("write file failed: {e}"))?;
 
+    Ok(())
+}
+
+// LSP Server Commands
+static mut LSP_SERVER_THREAD: Option<thread::JoinHandle<()>> = None;
+
+#[tauri::command]
+pub fn start_lsp_server(port: u16) -> Result<(), String> {
+    unsafe {
+        if LSP_SERVER_THREAD.is_some() {
+            return Err("LSP server is already running".to_string());
+        }
+
+        LSP_SERVER_THREAD = Some(thread::spawn(move || {
+            if let Err(e) = start_lsp_server_impl(port) {
+                eprintln!("LSP server error: {}", e);
+            }
+        }));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_lsp_server() -> Result<(), String> {
+    unsafe {
+        if let Some(handle) = LSP_SERVER_THREAD.take() {
+            handle.join().map_err(|e| format!("Failed to stop LSP server: {:?}", e))?;
+        }
+    }
+    Ok(())
+}
+
+fn start_lsp_server_impl(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    use lsp_server::{Connection, IoThreads};
+    use std::net::{TcpListener, TcpStream};
+    use std::io::{BufReader, BufWriter};
+
+    // Create TCP listener
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))?;
+    println!("LSP server listening on port {}", port);
+
+    // Accept connection
+    let (stream, _) = listener.accept()?;
+    let (reader, writer) = (BufReader::new(stream.try_clone()?), BufWriter::new(stream));
+    
+    let (connection, io_threads) = Connection::new(reader, writer);
+    
+    // Create and run LSP server
+    let mut server = crate::bin::lsp_server::SymiLanguageServer::new(connection);
+    server.run()?;
+    
+    io_threads.join()?;
+    
     Ok(())
 }
